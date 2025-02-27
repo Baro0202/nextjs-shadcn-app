@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: git-hub-ci-cd
         uses: actions/checkout@v3
 
       - name: Setup Node.js
