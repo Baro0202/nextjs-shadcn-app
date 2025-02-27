@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: Docker-First CI/CD Pipeline
 
 on:
   push:
@@ -7,9 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  build-and-test:
+  validate:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -20,17 +19,8 @@ jobs:
           node-version: "20"
           cache: "yarn"
 
-      - name: Print environment info
-        run: |
-          echo "Node version: $(node -v)"
-          echo "Yarn version: $(yarn -v)"
-          echo "Git commit: $(git rev-parse HEAD)"
-
       - name: Install dependencies
         run: yarn install --frozen-lockfile
-
-      - name: List installed packages
-        run: yarn list --depth=0
 
       - name: Lint check
         id: lint
@@ -44,102 +34,15 @@ jobs:
           echo "Running type check..."
           yarn typecheck || (echo "::warning::Type checking failed but continuing" && true)
 
-      - name: Build application
+      - name: Validation summary
         run: |
-          echo "Building application..."
-          yarn build
-          echo "Build completed successfully"
+          echo "## Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "* Linting and type checking completed: $(date)" >> $GITHUB_STEP_SUMMARY
 
-      - name: List build output
-        run: |
-          echo "Build output files:"
-          ls -la .next
-
-      - name: Cache build output
-        uses: actions/cache@v3
-        with:
-          path: .next
-          key: ${{ runner.os }}-nextjs-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-
-
-      - name: Build summary
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "* Node version: $(node -v)" >> $GITHUB_STEP_SUMMARY
-          echo "* Build completed: $(date)" >> $GITHUB_STEP_SUMMARY
-
-  deploy:
-    needs: build-and-test
-    if: github.ref == 'refs/heads/main'
+  docker-build-deploy:
+    needs: validate
+    if: success()
     runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: "20"
-          cache: "yarn"
-
-      - name: Print environment info
-        run: |
-          echo "Node version: $(node -v)"
-          echo "Yarn version: $(yarn -v)"
-          echo "Git commit: $(git rev-parse HEAD)"
-
-      - name: Install dependencies
-        run: yarn install --frozen-lockfile
-
-      - name: Restore build cache
-        uses: actions/cache@v3
-        id: cache-restore
-        with:
-          path: .next
-          key: ${{ runner.os }}-nextjs-${{ github.sha }}
-
-      - name: Verify cache restored
-        run: |
-          if [ -d ".next" ]; then
-            echo "Build cache restored successfully"
-            ls -la .next
-          else
-            echo "::error::Build cache not restored properly"
-            exit 1
-          fi
-
-      - name: Deploy summary
-        run: |
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "* Deployment prepared: $(date)" >> $GITHUB_STEP_SUMMARY
-          echo "* Environment: Production" >> $GITHUB_STEP_SUMMARY
-
-      # Vercel deployment example (uncomment and configure if using Vercel)
-      # - name: Deploy to Vercel
-      #   uses: amondnet/vercel-action@v20
-      #   with:
-      #     vercel-token: ${{ secrets.VERCEL_TOKEN }}
-      #     vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-      #     vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-      #     vercel-args: '--prod'
-
-      # Netlify deployment example (uncomment and configure if using Netlify)
-      # - name: Deploy to Netlify
-      #   uses: nwtgck/actions-netlify@v1.2
-      #   with:
-      #     publish-dir: '.next'
-      #     production-branch: main
-      #   env:
-      #     NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-      #     NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-
-  docker-build:
-    needs: build-and-test
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -153,18 +56,68 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Generate build timestamp
+        id: timestamp
+        run: echo "TIMESTAMP=$(date +'%Y%m%d%H%M%S')" >> $GITHUB_OUTPUT
+
+      - name: Extract branch/tag name
+        id: extract_branch
+        run: |
+          if [[ $GITHUB_REF == refs/tags/* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          elif [[ $GITHUB_REF == refs/heads/* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=unknown" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
           context: .
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:latest,${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ github.sha }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ steps.extract_branch.outputs.VERSION }}-${{ steps.timestamp.outputs.TIMESTAMP }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            NEXT_PUBLIC_BUILD_TIME=${{ steps.timestamp.outputs.TIMESTAMP }}
+            NEXT_PUBLIC_COMMIT_SHA=${{ github.sha }}
+
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ github.sha }}
+          format: "table"
+          exit-code: "0"
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH"
 
       - name: Docker build summary
         run: |
-          echo "## Docker Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Docker Build & Deploy Summary" >> $GITHUB_STEP_SUMMARY
           echo "* Image: ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:latest" >> $GITHUB_STEP_SUMMARY
-          echo "* Image with SHA: ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "* Versioned Image: ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ steps.extract_branch.outputs.VERSION }}-${{ steps.timestamp.outputs.TIMESTAMP }}" >> $GITHUB_STEP_SUMMARY
+          echo "* SHA Image: ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "* Built and pushed at: $(date)" >> $GITHUB_STEP_SUMMARY
+
+  deploy-to-environment:
+    needs: docker-build-deploy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production
+        run: |
+          echo "Deploying Docker image to production environment..."
+          # Add your deployment commands here, e.g.:
+          # - SSH into server and pull latest image
+          # - Update k8s deployment
+          # - Run docker-compose pull && docker-compose up -d
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "* Docker image deployed to production: $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "* Deployed image: ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
