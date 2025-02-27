@@ -1,12 +1,13 @@
-import React from "react";
-import Header from "../components/layout/header";
-import Footer from "../components/layout/footer";
+import { Inter } from "next/font/google";
+import "../styles/globals.css";
+import { ThemeProvider } from "@/components/theme-provider";
 
-import { ReactNode } from "react";
+const inter = Inter({ subsets: ["latin"] });
 
 export const metadata = {
-  title: "Next.js App",
-  description: "Created with Next.js, Shadcn UI and TailwindCSS",
+  title: "KokonutUI Dashboard",
+  description: "A modern dashboard with theme switching",
+  generator: "v0.dev",
 };
 
 export default function RootLayout({
@@ -15,13 +16,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body>
-        <div className="flex flex-col min-h-screen">
-          <Header />
-          <main className="flex-grow">{children}</main>
-          <Footer />
-        </div>
+    <html lang="en" suppressHydrationWarning>
+      <body className={inter.className}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          {children}
+        </ThemeProvider>
       </body>
     </html>
   );
