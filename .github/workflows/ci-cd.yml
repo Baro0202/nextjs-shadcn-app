@@ -18,7 +18,7 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: "20"
-          cache: "yarn"
+          # Removed yarn caching
 
       - name: Print environment info
         run: |
@@ -55,14 +55,6 @@ jobs:
           echo "Build output files:"
           ls -la .next
 
-      - name: Cache build output
-        uses: actions/cache@v3
-        with:
-          path: .next
-          key: ${{ runner.os }}-nextjs-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-
-
       - name: Build summary
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
@@ -82,7 +74,7 @@ jobs:
         uses: actions/setup-node@v3
         with:
           node-version: "20"
-          cache: "yarn"
+          # Removed yarn caching
 
       - name: Print environment info
         run: |
@@ -93,22 +85,13 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
-      - name: Restore build cache
-        uses: actions/cache@v3
-        id: cache-restore
-        with:
-          path: .next
-          key: ${{ runner.os }}-nextjs-${{ github.sha }}
-
-      - name: Verify cache restored
+      # Build the application again in the deploy job since we're not using cache
+      - name: Build application for deployment
         run: |
-          if [ -d ".next" ]; then
-            echo "Build cache restored successfully"
-            ls -la .next
-          else
-            echo "::error::Build cache not restored properly"
-            exit 1
-          fi
+          echo "Building application for deployment..."
+          yarn build
+          echo "Build completed successfully"
+          ls -la .next
 
       - name: Deploy summary
         run: |
