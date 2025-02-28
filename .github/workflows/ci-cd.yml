@@ -11,51 +11,51 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: git-hub-ci-cd
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Node.js
+      - name: Set up Node.js environment
         uses: actions/setup-node@v3
         with:
           node-version: "20"
           # Removed yarn caching
 
-      - name: Print environment info
+      - name: Display environment information
         run: |
           echo "Node version: $(node -v)"
           echo "Yarn version: $(yarn -v)"
           echo "Git commit: $(git rev-parse HEAD)"
 
-      - name: Install dependencies
+      - name: Install project dependencies
         run: yarn install --frozen-lockfile
 
-      - name: List installed packages
+      - name: Verify installed dependencies
         run: yarn list --depth=0
 
-      - name: Lint check
+      - name: Execute ESLint validation
         id: lint
         run: |
           echo "Running lint check..."
           yarn lint --max-warnings=0 || (echo "::warning::Linting failed but continuing" && true)
 
-      - name: Type check
+      - name: Perform TypeScript type validation
         id: typecheck
         run: |
           echo "Running type check..."
           yarn typecheck || (echo "::warning::Type checking failed but continuing" && true)
 
-      - name: Build application
+      - name: Build Next.js application
         run: |
           echo "Building application..."
           yarn build
           echo "Build completed successfully"
 
-      - name: List build output
+      - name: Verify build artifacts
         run: |
           echo "Build output files:"
           ls -la .next
 
-      - name: Build summary
+      - name: Generate build report
         run: |
           echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "* Node version: $(node -v)" >> $GITHUB_STEP_SUMMARY
@@ -67,53 +67,55 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: git-hub-ci-cd
+      - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Node.js
+      - name: Set up Node.js environment
         uses: actions/setup-node@v3
         with:
           node-version: "20"
           # Removed yarn caching
 
-      - name: Print environment info
+      - name: Display environment information
         run: |
           echo "Node version: $(node -v)"
           echo "Yarn version: $(yarn -v)"
           echo "Git commit: $(git rev-parse HEAD)"
 
-      - name: Install dependencies
+      - name: Install project dependencies
         run: yarn install --frozen-lockfile
 
-      # Build the application again in the deploy job since we're not using cache
-      - name: Build application for deployment
+      - name: Build Next.js application for production
         run: |
           echo "Building application for deployment..."
           yarn build
           echo "Build completed successfully"
           ls -la .next
 
-      - name: Deploy summary
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Authenticate with Docker Hub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Build and push Docker image
+      - name: Build and publish Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:buildcache,mode=max
+
+      - name: Generate deployment report
         run: |
           echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "* Deployment prepared: $(date)" >> $GITHUB_STEP_SUMMARY
           echo "* Environment: Production" >> $GITHUB_STEP_SUMMARY
-
-      # Vercel deployment example (uncomment and configure if using Vercel)
-      # - name: Deploy to Vercel
-      #   uses: amondnet/vercel-action@v20
-      #   with:
-      #     vercel-token: ${{ secrets.VERCEL_TOKEN }}
-      #     vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-      #     vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-      #     vercel-args: '--prod'
-
-      # Netlify deployment example (uncomment and configure if using Netlify)
-      # - name: Deploy to Netlify
-      #   uses: nwtgck/actions-netlify@v1.2
-      #   with:
-      #     publish-dir: '.next'
-      #     production-branch: main
-      #   env:
-      #     NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-      #     NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          echo "* Docker image: ${{ secrets.DOCKERHUB_USERNAME }}/nextjs-shadcn-app:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
